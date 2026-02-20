@@ -1,0 +1,36 @@
+name: Build CyberArkAuthApp
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore CyberArkAuthApp.csproj
+
+      - name: Build
+        run: dotnet build CyberArkAuthApp.csproj --configuration Release --no-restore
+
+      - name: Publish
+        run: dotnet publish CyberArkAuthApp.csproj --configuration Release --no-build --output ./publish
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CyberArkAuthApp
+          path: ./publish/
