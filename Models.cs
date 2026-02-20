@@ -10,6 +10,7 @@ namespace CyberArkAuthApp
 
     public class IdentityResult {
         public string Token { get; set; }
+        public string PodFqdn { get; set; }
     }
 
     public class AccountResponse {
