@@ -140,11 +140,23 @@ namespace CyberArkAuthApp
             this.label3.TabIndex = 9;
             this.label3.Text = "Mode";
             // 
+            // chkUseToken
+            // 
+            this.chkUseToken = new System.Windows.Forms.CheckBox();
+            this.chkUseToken.AutoSize = true;
+            this.chkUseToken.Location = new System.Drawing.Point(710, 14);
+            this.chkUseToken.Name = "chkUseToken";
+            this.chkUseToken.Size = new System.Drawing.Size(79, 19);
+            this.chkUseToken.TabIndex = 10;
+            this.chkUseToken.Text = "Use Token";
+            this.chkUseToken.UseVisualStyleBackColor = true;
+            // 
             // MainForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(800, 544);
+            this.Controls.Add(this.chkUseToken);
             this.Controls.Add(this.label3);
             this.Controls.Add(this.label2);
             this.Controls.Add(this.label1);
@@ -176,5 +188,6 @@ namespace CyberArkAuthApp
         private System.Windows.Forms.Label label1;
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.Label label3;
+        private System.Windows.Forms.CheckBox chkUseToken;
     }
 }

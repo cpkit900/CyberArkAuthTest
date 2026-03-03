@@ -25,7 +25,7 @@ namespace CyberArkAuthApp
             var handler = new HttpClientHandler() { CookieContainer = _cookieContainer, UseCookies = true };
             _httpClient = new HttpClient(handler);
             cmbMode.Items.AddRange(new string[] { "OIDC", "SAML" });
-            cmbMode.SelectedIndex = 0;
+            cmbMode.SelectedIndex = 1; // Default to SAML
         }
 
         private void Log(string message) =>
@@ -37,6 +37,7 @@ namespace CyberArkAuthApp
                 _authSuccessHandled = false;
                 // Default Base URL
                 _baseUrl = $"https://{txtTenant.Text}.id.cyberark.cloud";
+                webView.Visible = true; // Show on start
                 await InitializeBrowser();
                 await StartCyberArkAuth();
             }
@@ -94,6 +95,11 @@ namespace CyberArkAuthApp
                 if (!string.IsNullOrEmpty(_idToken))
                 {
                     _authSuccessHandled = true;
+                    // Hide webview after successful login token detection
+                    this.Invoke(new MethodInvoker(() => {
+                         webView.Visible = false;
+                    }));
+
                     var uri = new Uri(url);
                     await FetchAccounts(uri.Host);
                 }
@@ -202,18 +208,32 @@ namespace CyberArkAuthApp
             Log($"Attempting GET: {pamUrl}");
 
             try {
+                // Determine whether to use Token or Cookies based on checkbox
+                HttpClient clientToUse = _httpClient; 
+                
+                if (chkUseToken.Checked) {
+                    // Create a new client temporarily to bypass the cookie container, strictly testing the Token
+                    var handler = new HttpClientHandler() { UseCookies = false };
+                    clientToUse = new HttpClient(handler);
+                }
+
                 // Use the idToken JWT as a Bearer token for the API call
                 using var request = new HttpRequestMessage(HttpMethod.Get, pamUrl);
-                if (!string.IsNullOrEmpty(_idToken))
+                if (chkUseToken.Checked && !string.IsNullOrEmpty(_idToken)) {
                     request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _idToken);
+                    Log("Using Bearer Token for Auth.");
+                } else {
+                    Log("Using Cookies for Auth.");
+                }
 
-                var response = await _httpClient.SendAsync(request);
+                var response = await clientToUse.SendAsync(request);
                 var content = await response.Content.ReadAsStringAsync();
                 
                 Log($"Response ({response.StatusCode}): {content.Substring(0, Math.Min(500, content.Length))}");
 
                 if (response.IsSuccessStatusCode) {
-                     var data = JsonSerializer.Deserialize<AccountResponse>(content);
+                     var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                     var data = JsonSerializer.Deserialize<AccountResponse>(content, options);
                      this.Invoke(new MethodInvoker(() => {
                         dgvAccounts.DataSource = data.value;
                         Log($"Success! Displaying {data.value?.Count ?? 0} accounts.");
