@@ -37,8 +37,6 @@ namespace CyberArkAuthApp
                 _authSuccessHandled = false;
                 // Default Base URL
                 _baseUrl = $"https://{txtTenant.Text}.id.cyberark.cloud";
-                webView.Visible = true; // Show on start
-                await InitializeBrowser();
                 await StartCyberArkAuth();
             }
             catch (Exception ex) {
@@ -46,71 +44,6 @@ namespace CyberArkAuthApp
             }
         }
 
-        private async Task InitializeBrowser()
-        {
-            await webView.EnsureCoreWebView2Async();
-            Log($"Browser Initialized for {cmbMode.Text}.");
-            
-            // Subscribe to navigation completion to check for login success
-            webView.NavigationCompleted -= WebView_NavigationCompleted;
-            webView.NavigationCompleted += WebView_NavigationCompleted;
-        }
-
-        private async void WebView_NavigationCompleted(object sender, CoreWebView2NavigationCompletedEventArgs e)
-        {
-            if (!e.IsSuccess) return;
-
-            string currentUrl = webView.Source.ToString();
-            Log($"Navigation Completed: {currentUrl}");
-
-            // Check if we are on a CyberArk domain (relaxed check for vanity URLs)
-            if (currentUrl.Contains("cyberark.cloud", StringComparison.OrdinalIgnoreCase) && !_authSuccessHandled)
-            {
-                await CheckForAuthCookies(currentUrl);
-            }
-        }
-
-        private async Task CheckForAuthCookies(string url)
-        {
-            try {
-                var cookieManager = webView.CoreWebView2.CookieManager;
-                var cookies = await cookieManager.GetCookiesAsync(url);
-
-                Log($"Inspecting cookies for {url}:");
-                foreach (var cookie in cookies)
-                {
-                    Log($"Cookie: {cookie.Name} (Domain: {cookie.Domain})");
-                    
-                    // CyberArk modern OIDC flow uses an idToken- JWT cookie (not .ASPXAUTH)
-                    if (cookie.Name.StartsWith("idToken-", StringComparison.OrdinalIgnoreCase))
-                    {
-                        _idToken = cookie.Value;
-                        Log("idToken JWT found! Login successful.");
-                    }
-                    
-                    // Also add to HttpClient cookie container
-                    _cookieContainer.Add(new System.Net.Cookie(cookie.Name, cookie.Value, cookie.Path, cookie.Domain));
-                }
-
-                if (!string.IsNullOrEmpty(_idToken))
-                {
-                    _authSuccessHandled = true;
-                    // Hide webview after successful login token detection
-                    this.Invoke(new MethodInvoker(() => {
-                         webView.Visible = false;
-                    }));
-
-                    var uri = new Uri(url);
-                    await FetchAccounts(uri.Host);
-                }
-                else
-                {
-                    Log("No idToken found yet. Waiting for more navigations...");
-                }
-            } catch (Exception ex) {
-                Log($"Cookie Check Error: {ex.Message}");
-            }
-        }
 
         private async Task StartCyberArkAuth()
         {
@@ -180,8 +113,38 @@ namespace CyberArkAuthApp
                 }
 
                 if (!string.IsNullOrEmpty(redirectUrl)) {
-                    Log($"Redirecting WebView2 to: {redirectUrl}");
-                    webView.CoreWebView2.Navigate(redirectUrl);
+                    Log($"Opening Auth Form for: {redirectUrl}");
+                    using (var authForm = new AuthForm(redirectUrl))
+                    {
+                        if (authForm.ShowDialog() == DialogResult.OK)
+                        {
+                            _idToken = authForm.IdToken;
+
+                            foreach (var cookie in authForm.AuthCookies)
+                            {
+                                try {
+                                    // Make sure we pass the correct properties, some domains might start with '.'
+                                    var netCookie = new System.Net.Cookie(cookie.Name, cookie.Value, cookie.Path, cookie.Domain);
+                                    
+                                    // Security attributes
+                                    netCookie.Secure = cookie.IsSecure;
+                                    netCookie.HttpOnly = cookie.IsHttpOnly;
+                                    
+                                    _cookieContainer.Add(netCookie);
+                                    Log($"Imported Cookie: {cookie.Name} for {cookie.Domain}");
+                                } catch (Exception ex) { 
+                                    Log($"Skipped cookie {cookie.Name}: {ex.Message}");
+                                }
+                            }
+                            
+                            var uri = new Uri(authForm.FinalUrl);
+                            await FetchAccounts(uri.Host);
+                        }
+                        else 
+                        {
+                            Log("Authentication was cancelled or failed.");
+                        }
+                    }
                 } else {
                     Log("No Redirect URL found. Is the user federated?");
                 }

@@ -33,13 +33,11 @@ namespace CyberArkAuthApp
             this.txtEmail = new System.Windows.Forms.TextBox();
             this.cmbMode = new System.Windows.Forms.ComboBox();
             this.btnStart = new System.Windows.Forms.Button();
-            webView = new Microsoft.Web.WebView2.WinForms.WebView2();
             this.txtLogs = new System.Windows.Forms.TextBox();
             this.dgvAccounts = new System.Windows.Forms.DataGridView();
             this.label1 = new System.Windows.Forms.Label();
             this.label2 = new System.Windows.Forms.Label();
             this.label3 = new System.Windows.Forms.Label();
-            ((System.ComponentModel.ISupportInitialize)(this.webView)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.dgvAccounts)).BeginInit();
             this.SuspendLayout();
             // 
@@ -76,20 +74,6 @@ namespace CyberArkAuthApp
             this.btnStart.Text = "Start";
             this.btnStart.UseVisualStyleBackColor = true;
             this.btnStart.Click += new System.EventHandler(this.btnStart_Click);
-            // 
-            // webView
-            // 
-            this.webView.AllowExternalDrop = true;
-            this.webView.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
-            | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
-            this.webView.CreationProperties = null;
-            this.webView.DefaultBackgroundColor = System.Drawing.Color.White;
-            this.webView.Location = new System.Drawing.Point(12, 41);
-            this.webView.Name = "webView";
-            this.webView.Size = new System.Drawing.Size(776, 252);
-            this.webView.TabIndex = 4;
-            this.webView.ZoomFactor = 1D;
             // 
             // txtLogs
             // 
@@ -162,14 +146,12 @@ namespace CyberArkAuthApp
             this.Controls.Add(this.label1);
             this.Controls.Add(this.dgvAccounts);
             this.Controls.Add(this.txtLogs);
-            this.Controls.Add(this.webView);
             this.Controls.Add(this.btnStart);
             this.Controls.Add(this.cmbMode);
             this.Controls.Add(this.txtEmail);
             this.Controls.Add(this.txtTenant);
             this.Name = "MainForm";
             this.Text = "CyberArk Authentication App";
-            ((System.ComponentModel.ISupportInitialize)(this.webView)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.dgvAccounts)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
@@ -182,7 +164,6 @@ namespace CyberArkAuthApp
         private System.Windows.Forms.TextBox txtEmail;
         private System.Windows.Forms.ComboBox cmbMode;
         private System.Windows.Forms.Button btnStart;
-        private Microsoft.Web.WebView2.WinForms.WebView2 webView;
         private System.Windows.Forms.TextBox txtLogs;
         private System.Windows.Forms.DataGridView dgvAccounts;
         private System.Windows.Forms.Label label1;
