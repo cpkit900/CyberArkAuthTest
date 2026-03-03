@@ -1,13 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Net;
-using System.Net.Http;
-using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
+using RestSharp;
 
 namespace CyberArkAuthApp
 {
@@ -15,15 +13,13 @@ namespace CyberArkAuthApp
     {
         private string _baseUrl;
         private string _idToken;
-        private readonly HttpClient _httpClient;
+        private string _pamSessionToken;  // CyberArk session token obtained from PAM SAML logon
+        private string _detectedPamHost;  // Last auto-discovered PAM host
         private readonly CookieContainer _cookieContainer = new CookieContainer();
-        private bool _authSuccessHandled = false;
 
         public MainForm()
         {
             InitializeComponent();
-            var handler = new HttpClientHandler() { CookieContainer = _cookieContainer, UseCookies = true };
-            _httpClient = new HttpClient(handler);
             cmbMode.Items.AddRange(new string[] { "OIDC", "SAML" });
             cmbMode.SelectedIndex = 1; // Default to SAML
         }
@@ -34,8 +30,7 @@ namespace CyberArkAuthApp
         private async void btnStart_Click(object sender, EventArgs e)
         {
             try {
-                _authSuccessHandled = false;
-                // Default Base URL
+                Log("Starting Unified Authentication Flow...");
                 _baseUrl = $"https://{txtTenant.Text}.id.cyberark.cloud";
                 await StartCyberArkAuth();
             }
@@ -44,11 +39,10 @@ namespace CyberArkAuthApp
             }
         }
 
-
         private async Task StartCyberArkAuth()
         {
             Log("Step 1: Contacting CyberArk StartAuthentication...");
-            
+
             bool redirectNeeded = true;
             int maxRedirects = 3;
             int currentRedirect = 0;
@@ -59,18 +53,16 @@ namespace CyberArkAuthApp
                 currentRedirect++;
 
                 string url = $"{_baseUrl}/Security/StartAuthentication";
-                var payload = new { User = txtEmail.Text, Version = "1.0" };
-                var jsonPayload = JsonSerializer.Serialize(payload);
-                
                 Log($"POST URL: {url}");
 
-                // We use a clean client for this initial handshake if we want, or just the main one.
-                // Using main one involves cookies which is fine.
-                var response = await _httpClient.PostAsync(url, 
-                    new StringContent(jsonPayload, Encoding.UTF8, "application/json"));
-                
-                var json = await response.Content.ReadAsStringAsync();
-                
+                var client = new RestClient(_baseUrl);
+                var request = new RestRequest("/Security/StartAuthentication", Method.Post);
+                var bodyJson = JsonSerializer.Serialize(new { User = txtEmail.Text, Version = "1.0" });
+                request.AddStringBody(bodyJson, DataFormat.Json);
+
+                var response = await client.ExecuteAsync(request);
+                var json = response.Content ?? "";
+
                 var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
                 var authResponse = JsonSerializer.Deserialize<IdentityAuthResponse>(json, options);
 
@@ -79,68 +71,97 @@ namespace CyberArkAuthApp
                     Log($"PodFqdn received: {authResponse.Result.PodFqdn}. Switching URL...");
                     _baseUrl = $"https://{authResponse.Result.PodFqdn}";
                     redirectNeeded = true;
-                    continue; 
+                    continue;
                 }
 
-                // Parse for Redirect URL (IdP or SAML)
-                // If it's pure OIDC/SAML federation, StartAuthentication usually returns the redirect URL directly.
-                using var doc = JsonDocument.Parse(json);
                 string redirectUrl = "";
-                
                 try {
-                    // Try to get IdpRedirectUrl directly (common for some flows)
-                     if (doc.RootElement.TryGetProperty("Result", out var resultEl)) {
+                    using var doc = JsonDocument.Parse(json);
+                    if (doc.RootElement.TryGetProperty("Result", out var resultEl)) {
                         if (resultEl.TryGetProperty("IdpRedirectUrl", out var idpUrl)) {
-                            redirectUrl = idpUrl.GetString();
+                            redirectUrl = idpUrl.GetString() ?? "";
                         }
-                        // Fallback to mechanisms check if not found directly
                         else if (resultEl.TryGetProperty("Challenges", out var challenges) && challenges.GetArrayLength() > 0) {
                             var prompt = challenges[0].GetProperty("Mechanisms")[0].GetProperty("Prompt").GetString();
-                            // Sometimes the prompt IS the redirect URL for some mechanisms? 
-                            // Or we might need to "Advance" with "Start" mechanism.
-                            // But for "IdpRedirectUrl" it specifically means "Go Here".
-                            // Assume if we didn't get IdpRedirectUrl, we might have standard logic.
-                            // For this specific issue (OIDC/SAML), IdpRedirectUrl is key.
-                            
-                            if (string.IsNullOrEmpty(redirectUrl) && !string.IsNullOrEmpty(prompt) && prompt.StartsWith("http"))
-                            {
+                            if (!string.IsNullOrEmpty(prompt) && prompt.StartsWith("http"))
                                 redirectUrl = prompt;
-                            }
                         }
-                     }
+                    }
                 } catch (Exception ex) {
-                     Log($"Error parsing response: {ex.Message}");
+                    Log($"Error parsing response: {ex.Message}");
                 }
 
                 if (!string.IsNullOrEmpty(redirectUrl)) {
                     Log($"Opening Auth Form for: {redirectUrl}");
-                    using (var authForm = new AuthForm(redirectUrl, chkUseToken.Checked))
+
+                    // Discover the correct PAM host
+                    string privilegeCloudHost = await DiscoverPamHostAsync();
+                    Log($"Discovered PAM Host: {privilegeCloudHost}");
+
+                    using (var authForm = new AuthForm(redirectUrl, chkUseToken.Checked, privilegeCloudHost))
                     {
                         if (authForm.ShowDialog() == DialogResult.OK)
                         {
                             _idToken = authForm.IdToken;
 
-                            foreach (var cookie in authForm.AuthCookies)
+                            // Import cookies from WebView2 into our CookieContainer if requested
+                            if (chkUseCookies.Checked)
                             {
-                                try {
-                                    // Make sure we pass the correct properties, some domains might start with '.'
-                                    var netCookie = new System.Net.Cookie(cookie.Name, cookie.Value, cookie.Path, cookie.Domain);
-                                    
-                                    // Security attributes
-                                    netCookie.Secure = cookie.IsSecure;
-                                    netCookie.HttpOnly = cookie.IsHttpOnly;
-                                    
-                                    _cookieContainer.Add(netCookie);
-                                    Log($"Imported Cookie: {cookie.Name} for {cookie.Domain}");
-                                } catch (Exception ex) { 
-                                    Log($"Skipped cookie {cookie.Name}: {ex.Message}");
+                                Log("Importing Cookies from WebView2...");
+                                foreach (var cookie in authForm.AuthCookies)
+                                {
+                                    try {
+                                        string domain = cookie.Domain;
+                                        string uriHost = domain.TrimStart('.');
+                                        var cookieUri = new Uri($"https://{uriHost}");
+
+                                        var netCookie = new System.Net.Cookie(cookie.Name, cookie.Value)
+                                        {
+                                            Domain = domain,
+                                            Path = string.IsNullOrEmpty(cookie.Path) ? "/" : cookie.Path,
+                                            Secure = cookie.IsSecure,
+                                            HttpOnly = cookie.IsHttpOnly
+                                        };
+
+                                        _cookieContainer.Add(cookieUri, netCookie);
+                                    } catch (Exception ex) {
+                                        Log($"Skipped cookie {cookie.Name}: {ex.Message}");
+                                    }
                                 }
                             }
-                            
-                            var uri = new Uri(authForm.FinalUrl);
-                            await FetchAccounts(uri.Host);
+
+                            // Detect actual PAM host from cookies or use discovered host
+                            string detectedPamHost = null;
+                            foreach (var cookie in authForm.AuthCookies)
+                            {
+                                if (cookie.Name.Equals("PreferredCulture", StringComparison.OrdinalIgnoreCase) ||
+                                    cookie.Domain.Contains("-pcloud.cyberark.cloud", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    detectedPamHost = cookie.Domain.TrimStart('.');
+                                    break;
+                                }
+                            }
+
+                            if (string.IsNullOrEmpty(detectedPamHost))
+                                detectedPamHost = privilegeCloudHost;
+
+                            _detectedPamHost = detectedPamHost;
+                            Log($"Using PAM Host: {_detectedPamHost}");
+
+                            // Token mode: exchange the intercepted SAML assertion for a PAM session token
+                            if (chkUseToken.Checked && !string.IsNullOrEmpty(authForm.SamlResponse))
+                            {
+                                Log("Intercepted SAML assertion. Exchanging for PAM session token...");
+                                _pamSessionToken = await ExchangeSamlForSessionToken(_detectedPamHost, authForm.SamlResponse);
+                                if (!string.IsNullOrEmpty(_pamSessionToken))
+                                    Log("PAM session token obtained successfully!");
+                                else
+                                    Log("Warning: No PAM session token returned — API calls may fail.");
+                            }
+
+                            await FetchAccounts(_detectedPamHost);
                         }
-                        else 
+                        else
                         {
                             Log("Authentication was cancelled or failed.");
                         }
@@ -151,62 +172,126 @@ namespace CyberArkAuthApp
             }
         }
 
-        private async Task FetchAccounts(string host = null)
+        private async Task FetchAccounts(string detectedPamHost = null)
         {
-            Log("Step 2: Accessing Privilege Cloud Accounts API (via Cookies)...");
-            
-            // Extract subdomain from identity portal host (e.g., rocketsoftware.cyberark.cloud => rocketsoftware)
-            // PAM API lives at <subdomain>.privilegecloud.cyberark.cloud
-            string subdomain = txtTenant.Text; // default fallback
-            if (!string.IsNullOrEmpty(host))
-            {
-                // host = e.g. "rocketsoftware.cyberark.cloud"
-                subdomain = host.Split('.')[0];
-            }
+            Log("Step 2: Accessing Privilege Cloud Accounts API...");
 
-            string targetHost = !string.IsNullOrEmpty(host) ? host : $"{subdomain}.privilegecloud.cyberark.cloud";
+            string pamHost = !string.IsNullOrEmpty(detectedPamHost)
+                ? detectedPamHost
+                : $"{txtPamTenant.Text}.privilegecloud.cyberark.cloud";
 
-            string pamUrl = $"https://{subdomain}.privilegecloud.cyberark.cloud/PasswordVault/API/Accounts?limit=10";
-            
+            string pamUrl = $"https://{pamHost}/PasswordVault/API/Accounts?limit=10";
             Log($"Attempting GET: {pamUrl}");
 
             try {
-                // Determine whether to use Token or Cookies based on checkbox
-                HttpClient clientToUse = _httpClient; 
+                var options = new RestClientOptions($"https://{pamHost}");
                 
-                if (chkUseToken.Checked) {
-                    // Create a new client temporarily to bypass the cookie container, strictly testing the Token
-                    var handler = new HttpClientHandler() { UseCookies = false };
-                    clientToUse = new HttpClient(handler);
-                }
-
-                // Use the idToken JWT as a Bearer token for the API call
-                using var request = new HttpRequestMessage(HttpMethod.Get, pamUrl);
-                if (chkUseToken.Checked && !string.IsNullOrEmpty(_idToken)) {
-                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _idToken);
-                    Log("Using Bearer Token for Auth.");
-                } else {
+                if (chkUseCookies.Checked) {
+                    options.CookieContainer = _cookieContainer;
                     Log("Using Cookies for Auth.");
                 }
 
-                var response = await clientToUse.SendAsync(request);
-                var content = await response.Content.ReadAsStringAsync();
-                
-                Log($"Response ({response.StatusCode}): {content.Substring(0, Math.Min(500, content.Length))}");
+                var client = new RestClient(options);
+                var request = new RestRequest("/PasswordVault/API/Accounts", Method.Get);
+                request.AddQueryParameter("limit", "10");
 
-                if (response.IsSuccessStatusCode) {
-                     var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                     var data = JsonSerializer.Deserialize<AccountResponse>(content, options);
-                     this.Invoke(new MethodInvoker(() => {
-                        dgvAccounts.DataSource = data.value;
-                        Log($"Success! Displaying {data.value?.Count ?? 0} accounts.");
-                    }));
-                } else {
-                    Log($"API Failed ({response.StatusCode}).");
+                if (chkUseToken.Checked && !string.IsNullOrEmpty(_pamSessionToken)) {
+                    request.AddHeader("Authorization", $"CyberArk {_pamSessionToken}");
+                    Log("Using CyberArk Session Token for Auth.");
                 }
 
+                var response = await client.ExecuteAsync(request);
+                HandleAccountsResponse(response.StatusCode, response.Content ?? "");
             } catch (Exception ex) {
                 Log($"API Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Discovers the correct PAM host by probing ISPSS (-pcloud) then legacy (.privilegecloud) URL patterns.
+        /// </summary>
+        private async Task<string> DiscoverPamHostAsync()
+        {
+            string tenant = txtPamTenant.Text.Trim();
+
+            // Try ISPSS (Shared Services) format first: {tenant}-pcloud.cyberark.cloud
+            string ispsHost = $"{tenant}-pcloud.cyberark.cloud";
+            // Try legacy format: {tenant}.privilegecloud.cyberark.cloud
+            string legacyHost = $"{tenant}.privilegecloud.cyberark.cloud";
+
+            Log($"Probing PAM hosts: {ispsHost} and {legacyHost}...");
+
+            foreach (var host in new[] { ispsHost, legacyHost })
+            {
+                try {
+                    var client = new RestClient($"https://{host}");
+                    var req = new RestRequest("/PasswordVault/v10/logon", Method.Get);
+                    req.Timeout = TimeSpan.FromSeconds(5);
+                    var resp = await client.ExecuteAsync(req);
+                    // Any response (even 401/redirect) means the host exists
+                    if (resp.ResponseStatus == RestSharp.ResponseStatus.Completed)
+                    {
+                        Log($"Discovered live PAM host: {host}");
+                        return host;
+                    }
+                } catch { /* Host not reachable, try next */ }
+            }
+
+            Log($"Could not auto-discover PAM host. Using: {legacyHost}");
+            return legacyHost;
+        }
+
+        /// <summary>
+        /// Exchanges a SAML assertion for a CyberArk PAM session token via SAML Logon API.
+        /// Returns the session token string, or null on failure.
+        /// </summary>
+        private async Task<string> ExchangeSamlForSessionToken(string pamHost, string samlResponse)
+        {
+            try {
+                var client = new RestClient($"https://{pamHost}");
+                var request = new RestRequest("/PasswordVault/API/auth/SAML/Logon", Method.Post);
+                // SAML logon expects form-encoded body
+                request.AddHeader("Content-Type", "application/x-www-form-urlencoded");
+                request.AddParameter("SAMLResponse", samlResponse);
+
+                var response = await client.ExecuteAsync(request);
+                string content = response.Content ?? "";
+
+                Log($"SAML Logon response ({response.StatusCode}): {content.Substring(0, Math.Min(200, content.Length))}");
+
+                if (response.StatusCode == HttpStatusCode.OK && !content.TrimStart().StartsWith("<"))
+                {
+                    // Session token is returned as a raw quoted string: "sessiontoken123"
+                    return content.Trim().Trim('"');
+                }
+            } catch (Exception ex) {
+                Log($"SAML Logon Error: {ex.Message}");
+            }
+            return null;
+        }
+
+
+        private void HandleAccountsResponse(HttpStatusCode statusCode, string content)
+        {
+            // If we got HTML back, the server redirected us to a login page - auth failed
+            if (content.TrimStart().StartsWith("<"))
+            {
+                Log($"API Error: Server returned a login/HTML page (HTTP {(int)statusCode}). "
+                  + "For ISPSS tenants, use Cookie mode instead of Token mode.");
+                return;
+            }
+
+            Log($"Response ({statusCode}): {content.Substring(0, Math.Min(500, content.Length))}");
+
+            if (statusCode == HttpStatusCode.OK) {
+                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                var data = JsonSerializer.Deserialize<AccountResponse>(content, options);
+                this.Invoke(new MethodInvoker(() => {
+                    dgvAccounts.DataSource = data?.value;
+                    Log($"Success! Displaying {data?.value?.Count ?? 0} accounts.");
+                }));
+            } else {
+                Log($"API Failed ({statusCode}).");
             }
         }
     }
