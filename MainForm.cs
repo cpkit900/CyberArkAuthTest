@@ -114,7 +114,7 @@ namespace CyberArkAuthApp
 
                 if (!string.IsNullOrEmpty(redirectUrl)) {
                     Log($"Opening Auth Form for: {redirectUrl}");
-                    using (var authForm = new AuthForm(redirectUrl))
+                    using (var authForm = new AuthForm(redirectUrl, chkUseToken.Checked))
                     {
                         if (authForm.ShowDialog() == DialogResult.OK)
                         {

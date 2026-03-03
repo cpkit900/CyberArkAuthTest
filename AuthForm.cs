@@ -13,11 +13,13 @@ namespace CyberArkAuthApp
         public string FinalUrl { get; private set; }
         
         private string _startUrl;
+        private bool _useToken;
 
-        public AuthForm(string startUrl)
+        public AuthForm(string startUrl, bool useToken)
         {
             InitializeComponent();
             _startUrl = startUrl;
+            _useToken = useToken;
             this.Load += AuthForm_Load;
             
             // Allow manual close to cancel
@@ -43,13 +45,9 @@ namespace CyberArkAuthApp
             
             if (currentUrl.Contains("cyberark.cloud", StringComparison.OrdinalIgnoreCase))
             {
-                // Instead of getting cookies just for the current URL, 
-                // we should get ALL cookies for the root domain or we might miss .privilegecloud cookies
-                // It's safer to just extract the domains we care about
                 var cookieManager = webView.CoreWebView2.CookieManager;
                 
                 // Get ALL cookies for the webview profile
-                // The GetCookiesAsync without URI gets all cookies for the profile
                 var cookies = await cookieManager.GetCookiesAsync(null);
 
                 bool idTokenFound = false;
@@ -57,7 +55,7 @@ namespace CyberArkAuthApp
 
                 foreach (var cookie in cookies)
                 {
-                    AuthCookies.Add(cookie); // Captures for identity AND privilegecloud
+                    AuthCookies.Add(cookie); 
                     if (cookie.Name.StartsWith("idToken-", StringComparison.OrdinalIgnoreCase))
                     {
                         IdToken = cookie.Value;
@@ -65,14 +63,47 @@ namespace CyberArkAuthApp
                     }
                 }
 
-                // We need to make sure we don't close prematurely before idToken is found.
-                // The URL might end up being a vanity URL or .cyberark.cloud without .id.
-                // If we found an idToken and we are on a cyberark.cloud domain, we are likely done.
-                if (idTokenFound)
+                // If the user checked "Use Token", we don't need Privilege Cloud cookies at all!
+                // We just need the idToken.
+                if (_useToken && idTokenFound)
                 {
                     FinalUrl = currentUrl;
-                    DialogResult = DialogResult.OK; // Sets DialogResult and signals FormClosing
+                    DialogResult = DialogResult.OK; 
                     Close();
+                    return;
+                }
+
+                if (!_useToken)
+                {
+                    // If we need Privilege Cloud cookies, we need them to be in the Vault
+                    if (currentUrl.Contains("privilegecloud", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Check if they moved past the logon page into the actual vault application
+                        // e.g., /PasswordVault/v10/Accounts or /PasswordVault/api/
+                        if (currentUrl.Contains("/v10", StringComparison.OrdinalIgnoreCase) && 
+                            !currentUrl.Contains("logon", StringComparison.OrdinalIgnoreCase) &&
+                            !currentUrl.Contains("SharedServices", StringComparison.OrdinalIgnoreCase))
+                        {
+                            FinalUrl = currentUrl;
+                            DialogResult = DialogResult.OK; 
+                            Close();
+                            return;
+                        }
+                    }
+                    else if (idTokenFound)
+                    {
+                        // If we have idToken but are still on Identity domain, automatically bounce them to the vault
+                        string host = new Uri(currentUrl).Host;
+                        if (host.EndsWith(".id.cyberark.cloud", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string tenant = host.Split('.')[0];
+                            // The best root url to trigger the ISPSS automatic login flow without hitting the "Shared Services" interstitial
+                            // is usually just the root PasswordVault/v10/ url, which handles OIDC auth bounce.
+                            string pamUrl = $"https://{tenant}.privilegecloud.cyberark.cloud/PasswordVault/v10/";
+                            webView.CoreWebView2.Navigate(pamUrl);
+                            return;
+                        }
+                    }
                 }
             }
         }
