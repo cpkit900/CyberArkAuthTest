@@ -91,10 +91,7 @@ namespace CyberArkAuthApp
             if (!e.IsSuccess) return;
 
             string currentUrl = webView.Source.ToString();
-
-            // Only process cyberark.cloud URLs
-            if (!currentUrl.Contains("cyberark.cloud", StringComparison.OrdinalIgnoreCase))
-                return;
+            DebugLog($"Navigated to: {currentUrl}");
 
             // Collect ALL cookies from the WebView profile
             var cookieManager = webView.CoreWebView2.CookieManager;
@@ -105,45 +102,62 @@ namespace CyberArkAuthApp
             foreach (var cookie in cookies)
             {
                 AuthCookies.Add(cookie);
-                if (cookie.Name.StartsWith("idToken-", StringComparison.OrdinalIgnoreCase))
+                if (cookie.Name.StartsWith("idToken-", StringComparison.OrdinalIgnoreCase) || 
+                    cookie.Name.Equals("idToken", StringComparison.OrdinalIgnoreCase))
                 {
                     IdToken = cookie.Value;
                     idTokenFound = true;
                 }
             }
+            
+            DebugLog($"Cookies captured: {AuthCookies.Count}. IdTokenFound: {idTokenFound}");
 
-            // ─── TOKEN MODE ───────────────────────────────────────────────────────────
-            // In token mode, we also need the SAML authentication to go through so the
-            // SAMLResponse gets intercepted. We close as soon as we have both idToken
-            // and the SAML assertion was captured (or we're on the PAM domain).
-            if (_useToken && idTokenFound)
+            // ─── EXIT CONDITIONS ───────────────────────────────────────────────────────────
+            bool onPamDomain = IsPamDomain(currentUrl);
+            
+            // 1. If we've captured a SAML response, we are definitively done with Token mode.
+            if (!string.IsNullOrEmpty(SamlResponse))
             {
-                bool onPamDomain = IsPamDomain(currentUrl);
+                DebugLog("SAMLResponse captured. Exiting WebView.");
+                FinalUrl = currentUrl;
+                DialogResult = DialogResult.OK;
+                Close();
+                return;
+            }
 
-                if (!_navigatedToPam && !onPamDomain)
+            // 2. TOKEN MODE
+            if (_useToken)
+            {
+                // If we're on Cloud and we got an idToken, we need to manually force navigation 
+                // to PAM to trigger the SAML assertion pass.
+                if (idTokenFound && !_navigatedToPam && !onPamDomain)
                 {
-                    // Navigate to PAM to trigger SAML SSO → captures SamlResponse via WebResourceRequested
+                    DebugLog("Cloud flow: IdToken found, forcing navigation to PAM to trigger SAML.");
                     _navigatedToPam = true;
                     string pamUrl = $"https://{_privilegeCloudHost}/PasswordVault/v10/";
                     webView.CoreWebView2.Navigate(pamUrl);
                     return;
                 }
 
-                // If we got the SAML response already, or we're on PAM domain, we're done
-                if (!string.IsNullOrEmpty(SamlResponse) || onPamDomain)
+                // If On-Premise, or Cloud that already reached PAM, if we're on the PAM domain
+                // and we're past the logon pages, we can close. (Though usually SamlResponse catches it first).
+                if (onPamDomain)
                 {
-                    FinalUrl = currentUrl;
-                    DialogResult = DialogResult.OK;
-                    Close();
-                    return;
+                    bool stillOnLoginPage = currentUrl.Contains("/logon", StringComparison.OrdinalIgnoreCase);
+                    if (!stillOnLoginPage && currentUrl.Contains("/PasswordVault", StringComparison.OrdinalIgnoreCase))
+                    {
+                        DebugLog("Reached PAM Vault after login without SAML capture (Token mode fallback). Exiting.");
+                        FinalUrl = currentUrl;
+                        DialogResult = DialogResult.OK;
+                        Close();
+                        return;
+                    }
                 }
             }
 
             // ─── COOKIE MODE ──────────────────────────────────────────────────────────
             if (!_useToken)
             {
-                bool onPamDomain = IsPamDomain(currentUrl);
-
                 if (onPamDomain)
                 {
                     bool stillOnLoginPage =
@@ -169,9 +183,22 @@ namespace CyberArkAuthApp
             }
         }
 
-        private static bool IsPamDomain(string url) =>
-            url.Contains("privilegecloud.cyberark.cloud", StringComparison.OrdinalIgnoreCase)
-            || url.Contains("-pcloud.cyberark.cloud", StringComparison.OrdinalIgnoreCase);
+        private void DebugLog(string msg)
+        {
+            System.Diagnostics.Debug.WriteLine($"[AuthForm] {msg}");
+        }
+
+        private bool IsPamDomain(string url)
+        {
+            // For On-Premise, _privilegeCloudHost is exactly the PVWA hostname (e.g. pvwa.local)
+            // For Cloud, it's the discovered host (e.g. tenant-pcloud.cyberark.cloud)
+            if (url.Contains(_privilegeCloudHost, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Fallback for cloud just in case of redirects
+            return url.Contains("privilegecloud.cyberark.cloud", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("-pcloud.cyberark.cloud", StringComparison.OrdinalIgnoreCase);
+        }
 
         private void AuthForm_FormClosing(object sender, FormClosingEventArgs e)
         {

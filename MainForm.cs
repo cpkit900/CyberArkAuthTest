@@ -22,6 +22,23 @@ namespace CyberArkAuthApp
             InitializeComponent();
             cmbMode.Items.AddRange(new string[] { "OIDC", "SAML" });
             cmbMode.SelectedIndex = 1; // Default to SAML
+            
+            cmbDeploymentType.Items.AddRange(new string[] { "Cloud", "On-Premise" });
+            cmbDeploymentType.SelectedIndex = 0; // Default to Cloud
+            cmbDeploymentType.SelectedIndexChanged += CmbDeploymentType_SelectedIndexChanged;
+        }
+
+        private void CmbDeploymentType_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            bool isCloud = cmbDeploymentType.SelectedItem?.ToString() == "Cloud";
+            
+            // Toggle Cloud fields
+            label1.Visible = txtTenant.Visible = isCloud;
+            label4.Visible = txtPamTenant.Visible = isCloud;
+            label2.Visible = txtEmail.Visible = isCloud;
+
+            // Toggle On-Premise fields
+            labelPvwaUrl.Visible = txtPvwaUrl.Visible = !isCloud;
         }
 
         private void Log(string message) =>
@@ -31,7 +48,9 @@ namespace CyberArkAuthApp
         {
             try {
                 Log("Starting Unified Authentication Flow...");
-                _baseUrl = $"https://{txtTenant.Text}.id.cyberark.cloud";
+                if (cmbDeploymentType.SelectedItem?.ToString() == "Cloud") {
+                    _baseUrl = $"https://{txtTenant.Text}.id.cyberark.cloud";
+                }
                 await StartCyberArkAuth();
             }
             catch (Exception ex) {
@@ -41,62 +60,94 @@ namespace CyberArkAuthApp
 
         private async Task StartCyberArkAuth()
         {
-            Log("Step 1: Contacting CyberArk StartAuthentication...");
+            bool isCloud = cmbDeploymentType.SelectedItem?.ToString() == "Cloud";
+            string redirectUrl = "";
+            string privilegeCloudHost = "";
 
-            bool redirectNeeded = true;
-            int maxRedirects = 3;
-            int currentRedirect = 0;
-
-            while (redirectNeeded && currentRedirect < maxRedirects)
+            if (isCloud)
             {
-                redirectNeeded = false;
-                currentRedirect++;
+                Log("Step 1: Contacting CyberArk StartAuthentication...");
 
-                string url = $"{_baseUrl}/Security/StartAuthentication";
-                Log($"POST URL: {url}");
+                bool redirectNeeded = true;
+                int maxRedirects = 3;
+                int currentRedirect = 0;
 
-                var client = new RestClient(_baseUrl);
-                var request = new RestRequest("/Security/StartAuthentication", Method.Post);
-                var bodyJson = JsonSerializer.Serialize(new { User = txtEmail.Text, Version = "1.0" });
-                request.AddStringBody(bodyJson, DataFormat.Json);
-
-                var response = await client.ExecuteAsync(request);
-                var json = response.Content ?? "";
-
-                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                var authResponse = JsonSerializer.Deserialize<IdentityAuthResponse>(json, options);
-
-                if (!string.IsNullOrEmpty(authResponse?.Result?.PodFqdn))
+                while (redirectNeeded && currentRedirect < maxRedirects)
                 {
-                    Log($"PodFqdn received: {authResponse.Result.PodFqdn}. Switching URL...");
-                    _baseUrl = $"https://{authResponse.Result.PodFqdn}";
-                    redirectNeeded = true;
-                    continue;
-                }
+                    redirectNeeded = false;
+                    currentRedirect++;
 
-                string redirectUrl = "";
-                try {
-                    using var doc = JsonDocument.Parse(json);
-                    if (doc.RootElement.TryGetProperty("Result", out var resultEl)) {
-                        if (resultEl.TryGetProperty("IdpRedirectUrl", out var idpUrl)) {
-                            redirectUrl = idpUrl.GetString() ?? "";
-                        }
-                        else if (resultEl.TryGetProperty("Challenges", out var challenges) && challenges.GetArrayLength() > 0) {
-                            var prompt = challenges[0].GetProperty("Mechanisms")[0].GetProperty("Prompt").GetString();
-                            if (!string.IsNullOrEmpty(prompt) && prompt.StartsWith("http"))
-                                redirectUrl = prompt;
-                        }
+                    string url = $"{_baseUrl}/Security/StartAuthentication";
+                    Log($"POST URL: {url}");
+
+                    var client = new RestClient(_baseUrl);
+                    var request = new RestRequest("/Security/StartAuthentication", Method.Post);
+                    var bodyJson = JsonSerializer.Serialize(new { User = txtEmail.Text, Version = "1.0" });
+                    request.AddStringBody(bodyJson, DataFormat.Json);
+
+                    var response = await client.ExecuteAsync(request);
+                    var json = response.Content ?? "";
+
+                    var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                    var authResponse = JsonSerializer.Deserialize<IdentityAuthResponse>(json, options);
+
+                    if (!string.IsNullOrEmpty(authResponse?.Result?.PodFqdn))
+                    {
+                        Log($"PodFqdn received: {authResponse.Result.PodFqdn}. Switching URL...");
+                        _baseUrl = $"https://{authResponse.Result.PodFqdn}";
+                        redirectNeeded = true;
+                        continue;
                     }
-                } catch (Exception ex) {
-                    Log($"Error parsing response: {ex.Message}");
+
+                    try {
+                        using var doc = JsonDocument.Parse(json);
+                        if (doc.RootElement.TryGetProperty("Result", out var resultEl)) {
+                            if (resultEl.TryGetProperty("IdpRedirectUrl", out var idpUrl)) {
+                                redirectUrl = idpUrl.GetString() ?? "";
+                            }
+                            else if (resultEl.TryGetProperty("Challenges", out var challenges) && challenges.GetArrayLength() > 0) {
+                                var prompt = challenges[0].GetProperty("Mechanisms")[0].GetProperty("Prompt").GetString();
+                                if (!string.IsNullOrEmpty(prompt) && prompt.StartsWith("http"))
+                                    redirectUrl = prompt;
+                            }
+                        }
+                    } catch (Exception ex) {
+                        Log($"Error parsing response: {ex.Message}");
+                    }
+                } // End Cloud while loop
+
+                if (string.IsNullOrEmpty(redirectUrl)) {
+                    Log("No Redirect URL found from Identity. Is the user federated?");
+                    return;
                 }
+                
+                privilegeCloudHost = await DiscoverPamHostAsync();
+                Log($"Discovered PAM Host: {privilegeCloudHost}");
+            }
+            else
+            {
+                // On-Premise Flow
+                string rawPvwaInput = txtPvwaUrl.Text.Trim();
+                
+                // Clean the input to just get the host, in case the user typed "https://host/"
+                if (rawPvwaInput.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+                    rawPvwaInput = rawPvwaInput.Substring(7);
+                if (rawPvwaInput.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                    rawPvwaInput = rawPvwaInput.Substring(8);
+                
+                rawPvwaInput = rawPvwaInput.TrimEnd('/');
 
-                if (!string.IsNullOrEmpty(redirectUrl)) {
-                    Log($"Opening Auth Form for: {redirectUrl}");
+                privilegeCloudHost = rawPvwaInput;
+                Log($"Step 1: On-Premise mode selected. Targeting PVWA directly at {privilegeCloudHost}");
+                
+                // For On-Premise, we point the WebView2 directly to the PVWA SAML logon endpoint
+                // which will automatically trigger the IdP redirect.
+                redirectUrl = $"https://{privilegeCloudHost}/PasswordVault/v10/logon/saml";
+            }
 
-                    // Discover the correct PAM host
-                    string privilegeCloudHost = await DiscoverPamHostAsync();
-                    Log($"Discovered PAM Host: {privilegeCloudHost}");
+            // Launch Auth Form Common Flow
+            if (!string.IsNullOrEmpty(redirectUrl)) {
+                Log($"Opening Auth Form for: {redirectUrl}");
 
                     using (var authForm = new AuthForm(redirectUrl, chkUseToken.Checked, privilegeCloudHost))
                     {
@@ -169,7 +220,6 @@ namespace CyberArkAuthApp
                 } else {
                     Log("No Redirect URL found. Is the user federated?");
                 }
-            }
         }
 
         private async Task FetchAccounts(string detectedPamHost = null)

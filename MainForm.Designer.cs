@@ -28,48 +28,81 @@ namespace CyberArkAuthApp
             this.label2 = new System.Windows.Forms.Label();
             this.label3 = new System.Windows.Forms.Label();
             this.label4 = new System.Windows.Forms.Label();
+            // Deployment Type
+            this.labelDepType = new System.Windows.Forms.Label();
+            this.cmbDeploymentType = new System.Windows.Forms.ComboBox();
+            // PVWA URL
+            this.labelPvwaUrl = new System.Windows.Forms.Label();
+            this.txtPvwaUrl = new System.Windows.Forms.TextBox();
             ((System.ComponentModel.ISupportInitialize)(this.dgvAccounts)).BeginInit();
             this.SuspendLayout();
 
+            // labelDepType
+            this.labelDepType.AutoSize = true;
+            this.labelDepType.Location = new System.Drawing.Point(12, 15);
+            this.labelDepType.Text = "Environment";
+            // cmbDeploymentType
+            this.cmbDeploymentType.FormattingEnabled = true;
+            this.cmbDeploymentType.Location = new System.Drawing.Point(90, 12);
+            this.cmbDeploymentType.Name = "cmbDeploymentType";
+            this.cmbDeploymentType.Size = new System.Drawing.Size(100, 23);
+
+            // ── Cloud Specific Fields ──
             // label1 - ID Tenant
             this.label1.AutoSize = true;
-            this.label1.Location = new System.Drawing.Point(12, 15);
+            this.label1.Location = new System.Drawing.Point(200, 15);
             this.label1.Text = "ID Tenant";
             // txtTenant
-            this.txtTenant.Location = new System.Drawing.Point(82, 12);
+            this.txtTenant.Location = new System.Drawing.Point(260, 12);
             this.txtTenant.Name = "txtTenant";
-            this.txtTenant.Size = new System.Drawing.Size(90, 23);
+            this.txtTenant.Size = new System.Drawing.Size(80, 23);
             this.txtTenant.Text = "ace4189";
 
             // label4 - PAM Tenant
             this.label4.AutoSize = true;
-            this.label4.Location = new System.Drawing.Point(182, 15);
+            this.label4.Location = new System.Drawing.Point(350, 15);
             this.label4.Text = "PAM Tenant";
             // txtPamTenant
-            this.txtPamTenant.Location = new System.Drawing.Point(260, 12);
+            this.txtPamTenant.Location = new System.Drawing.Point(425, 12);
             this.txtPamTenant.Name = "txtPamTenant";
             this.txtPamTenant.Size = new System.Drawing.Size(100, 23);
             this.txtPamTenant.Text = "rocketsoftware";
 
             // label2 - Email
             this.label2.AutoSize = true;
-            this.label2.Location = new System.Drawing.Point(370, 15);
+            this.label2.Location = new System.Drawing.Point(535, 15);
             this.label2.Text = "Email";
             // txtEmail
-            this.txtEmail.Location = new System.Drawing.Point(415, 12);
+            this.txtEmail.Location = new System.Drawing.Point(575, 12);
             this.txtEmail.Name = "txtEmail";
-            this.txtEmail.Size = new System.Drawing.Size(140, 23);
-            this.txtEmail.Text = "testuser@rocketpowersystems.onmicrosoft.com";
+            this.txtEmail.Size = new System.Drawing.Size(130, 23);
+            this.txtEmail.Text = "user@domain.com";
 
+            // ── On-Premise Specific Fields ──
+            // labelPvwaUrl
+            this.labelPvwaUrl.AutoSize = true;
+            this.labelPvwaUrl.Location = new System.Drawing.Point(200, 15);
+            this.labelPvwaUrl.Text = "PVWA Base URL";
+            this.labelPvwaUrl.Visible = false;
+            // txtPvwaUrl
+            this.txtPvwaUrl.Location = new System.Drawing.Point(295, 12);
+            this.txtPvwaUrl.Name = "txtPvwaUrl";
+            this.txtPvwaUrl.Size = new System.Drawing.Size(180, 23);
+            this.txtPvwaUrl.Text = "pvwa.company.local";
+            this.txtPvwaUrl.Visible = false;
+
+            // ── Common Fields ──
             // label3 - Mode
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(565, 15);
+            this.label3.Location = new System.Drawing.Point(715, 15);
             this.label3.Text = "Mode";
+            this.label3.Visible = false; // Hiding to save space, enforcing SAML logic internally
             // cmbMode
             this.cmbMode.FormattingEnabled = true;
-            this.cmbMode.Location = new System.Drawing.Point(605, 12);
+            this.cmbMode.Location = new System.Drawing.Point(755, 12);
             this.cmbMode.Name = "cmbMode";
-            this.cmbMode.Size = new System.Drawing.Size(65, 23);
+            this.cmbMode.Size = new System.Drawing.Size(40, 23);
+            this.cmbMode.Visible = false;
 
             // Toggles
             this.chkUseToken.AutoSize = true;
@@ -83,9 +116,9 @@ namespace CyberArkAuthApp
             this.chkUseCookies.Checked = false;
 
             // btnStart
-            this.btnStart.Location = new System.Drawing.Point(680, 11);
+            this.btnStart.Location = new System.Drawing.Point(715, 41);
             this.btnStart.Name = "btnStart";
-            this.btnStart.Size = new System.Drawing.Size(108, 26);
+            this.btnStart.Size = new System.Drawing.Size(80, 26);
             this.btnStart.Text = "Connect";
             this.btnStart.UseVisualStyleBackColor = true;
             this.btnStart.Click += new System.EventHandler(this.btnStart_Click);
@@ -109,6 +142,10 @@ namespace CyberArkAuthApp
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(800, 560);
+            this.Controls.Add(this.labelDepType);
+            this.Controls.Add(this.cmbDeploymentType);
+            this.Controls.Add(this.labelPvwaUrl);
+            this.Controls.Add(this.txtPvwaUrl);
             this.Controls.Add(this.label1);
             this.Controls.Add(this.txtTenant);
             this.Controls.Add(this.label4);
@@ -144,5 +181,10 @@ namespace CyberArkAuthApp
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.Label label3;
         private System.Windows.Forms.Label label4;
+        private System.Windows.Forms.Label labelDepType;
+        private System.Windows.Forms.ComboBox cmbDeploymentType;
+        private System.Windows.Forms.Label labelPvwaUrl;
+        private System.Windows.Forms.TextBox txtPvwaUrl;
     }
 }
+
