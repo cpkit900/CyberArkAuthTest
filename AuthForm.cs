@@ -35,7 +35,14 @@ namespace CyberArkAuthApp
         private async void AuthForm_Load(object sender, EventArgs e)
         {
             try {
-                await webView.EnsureCoreWebView2Async();
+                // Enable Single Sign-On using the OS Primary Account to pass Entra ID
+                // Device State and Device Identifier conditional access policies.
+                var envOptions = new CoreWebView2EnvironmentOptions();
+                envOptions.AllowSingleSignOnUsingOSPrimaryAccount = true;
+                
+                var env = await CoreWebView2Environment.CreateAsync(null, null, envOptions);
+                await webView.EnsureCoreWebView2Async(env);
+                
                 webView.NavigationCompleted += WebView_NavigationCompleted;
 
                 // Intercept ALL web requests so we can capture the SAML assertion when it's POSTed to PAM

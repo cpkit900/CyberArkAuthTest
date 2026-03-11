@@ -20,6 +20,7 @@ namespace CyberArkAuthApp
             this.txtEmail = new System.Windows.Forms.TextBox();
             this.cmbMode = new System.Windows.Forms.ComboBox();
             this.btnStart = new System.Windows.Forms.Button();
+            this.btnClearCookies = new System.Windows.Forms.Button();
             this.chkUseToken = new System.Windows.Forms.CheckBox();
             this.chkUseCookies = new System.Windows.Forms.CheckBox();
             this.txtLogs = new System.Windows.Forms.TextBox();
@@ -116,12 +117,20 @@ namespace CyberArkAuthApp
             this.chkUseCookies.Checked = false;
 
             // btnStart
-            this.btnStart.Location = new System.Drawing.Point(715, 41);
+            this.btnStart.Location = new System.Drawing.Point(630, 41);
             this.btnStart.Name = "btnStart";
             this.btnStart.Size = new System.Drawing.Size(80, 26);
             this.btnStart.Text = "Connect";
             this.btnStart.UseVisualStyleBackColor = true;
             this.btnStart.Click += new System.EventHandler(this.btnStart_Click);
+
+            // btnClearCookies
+            this.btnClearCookies.Location = new System.Drawing.Point(715, 41);
+            this.btnClearCookies.Name = "btnClearCookies";
+            this.btnClearCookies.Size = new System.Drawing.Size(80, 26);
+            this.btnClearCookies.Text = "Clear Cache";
+            this.btnClearCookies.UseVisualStyleBackColor = true;
+            this.btnClearCookies.Click += new System.EventHandler(this.btnClearCookies_Click);
 
             // txtLogs
             this.txtLogs.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left) | System.Windows.Forms.AnchorStyles.Right)));
@@ -157,6 +166,7 @@ namespace CyberArkAuthApp
             this.Controls.Add(this.chkUseToken);
             this.Controls.Add(this.chkUseCookies);
             this.Controls.Add(this.btnStart);
+            this.Controls.Add(this.btnClearCookies);
             this.Controls.Add(this.txtLogs);
             this.Controls.Add(this.dgvAccounts);
             this.Name = "MainForm";
@@ -173,6 +183,7 @@ namespace CyberArkAuthApp
         private System.Windows.Forms.TextBox txtEmail;
         private System.Windows.Forms.ComboBox cmbMode;
         private System.Windows.Forms.Button btnStart;
+        private System.Windows.Forms.Button btnClearCookies;
         private System.Windows.Forms.CheckBox chkUseToken;
         private System.Windows.Forms.CheckBox chkUseCookies;
         private System.Windows.Forms.TextBox txtLogs;

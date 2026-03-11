@@ -46,6 +46,10 @@ namespace CyberArkAuthApp
 
         private async void btnStart_Click(object sender, EventArgs e)
         {
+            txtLogs.Clear();
+            dgvAccounts.DataSource = null;
+            _cookieContainer.GetCookies(new Uri("https://localhost")).Clear(); // Clear old cookies
+
             try {
                 Log("Starting Unified Authentication Flow...");
                 if (cmbDeploymentType.SelectedItem?.ToString() == "Cloud") {
@@ -55,6 +59,38 @@ namespace CyberArkAuthApp
             }
             catch (Exception ex) {
                 Log($"Initialization Error: {ex.Message}");
+            }
+        }
+
+        private async void btnClearCookies_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                Log("Clearing browser cache and cookies...");
+                
+                // 1. Clear RestSharp CookieContainer
+                _cookieContainer.GetCookies(new Uri("https://localhost")).Clear();
+                _cookieContainer.GetCookies(new Uri(txtPvwaUrl.Text.Contains("://") ? txtPvwaUrl.Text : $"https://{txtPvwaUrl.Text}")).Clear();
+
+                // 2. Clear WebView2 User Data by creating a temporary hidden WebView2 and using its Profile API
+                var tempWebView = new Microsoft.Web.WebView2.WinForms.WebView2();
+                var envOptions = new CoreWebView2EnvironmentOptions();
+                envOptions.AllowSingleSignOnUsingOSPrimaryAccount = true;
+                
+                var env = await CoreWebView2Environment.CreateAsync(null, null, envOptions);
+                await tempWebView.EnsureCoreWebView2Async(env);
+                
+                // Properly await the clear operation before disposing
+                await tempWebView.CoreWebView2.Profile.ClearBrowsingDataAsync(
+                    CoreWebView2BrowsingDataKinds.AllProfile);
+                    
+                tempWebView.Dispose();
+
+                Log("Cache cleared successfully. Please try connecting again.");
+            }
+            catch (Exception ex)
+            {
+                Log($"Error clearing cache: {ex.Message}");
             }
         }
 
@@ -155,29 +191,26 @@ namespace CyberArkAuthApp
                         {
                             _idToken = authForm.IdToken;
 
-                            // Import cookies from WebView2 into our CookieContainer if requested
-                            if (chkUseCookies.Checked)
+                            // Always import cookies from WebView2 into our CookieContainer as a fallback
+                            Log("Importing Cookies from WebView2...");
+                            foreach (var cookie in authForm.AuthCookies)
                             {
-                                Log("Importing Cookies from WebView2...");
-                                foreach (var cookie in authForm.AuthCookies)
-                                {
-                                    try {
-                                        string domain = cookie.Domain;
-                                        string uriHost = domain.TrimStart('.');
-                                        var cookieUri = new Uri($"https://{uriHost}");
+                                try {
+                                    string domain = cookie.Domain;
+                                    string uriHost = domain.TrimStart('.');
+                                    var cookieUri = new Uri($"https://{uriHost}");
 
-                                        var netCookie = new System.Net.Cookie(cookie.Name, cookie.Value)
-                                        {
-                                            Domain = domain,
-                                            Path = string.IsNullOrEmpty(cookie.Path) ? "/" : cookie.Path,
-                                            Secure = cookie.IsSecure,
-                                            HttpOnly = cookie.IsHttpOnly
-                                        };
+                                    var netCookie = new System.Net.Cookie(cookie.Name, cookie.Value)
+                                    {
+                                        Domain = domain,
+                                        Path = string.IsNullOrEmpty(cookie.Path) ? "/" : cookie.Path,
+                                        Secure = cookie.IsSecure,
+                                        HttpOnly = cookie.IsHttpOnly
+                                    };
 
-                                        _cookieContainer.Add(cookieUri, netCookie);
-                                    } catch (Exception ex) {
-                                        Log($"Skipped cookie {cookie.Name}: {ex.Message}");
-                                    }
+                                    _cookieContainer.Add(cookieUri, netCookie);
+                                } catch (Exception ex) {
+                                    Log($"Skipped cookie {cookie.Name}: {ex.Message}");
                                 }
                             }
 
@@ -236,7 +269,17 @@ namespace CyberArkAuthApp
             try {
                 var options = new RestClientOptions($"https://{pamHost}");
                 
-                if (chkUseCookies.Checked) {
+                bool isUsingToken = chkUseToken.Checked && !string.IsNullOrEmpty(_pamSessionToken);
+                bool isUsingCookies = chkUseCookies.Checked;
+
+                // Auto-fallback to cookies if token mode was requested but no token was obtained
+                if (chkUseToken.Checked && string.IsNullOrEmpty(_pamSessionToken))
+                {
+                    Log("Token mode failed, falling back to Cookie mode automatically.");
+                    isUsingCookies = true;
+                }
+                
+                if (isUsingCookies) {
                     options.CookieContainer = _cookieContainer;
                     Log("Using Cookies for Auth.");
                 }
@@ -245,7 +288,7 @@ namespace CyberArkAuthApp
                 var request = new RestRequest("/PasswordVault/API/Accounts", Method.Get);
                 request.AddQueryParameter("limit", "10");
 
-                if (chkUseToken.Checked && !string.IsNullOrEmpty(_pamSessionToken)) {
+                if (isUsingToken) {
                     request.AddHeader("Authorization", $"CyberArk {_pamSessionToken}");
                     Log("Using CyberArk Session Token for Auth.");
                 }
